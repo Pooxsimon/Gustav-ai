@@ -1,6 +1,7 @@
 // Vercel function: coba Gemini dulu (cepat), kalau gagal pakai OpenRouter sebagai cadangan.
 // API key disimpan di Vercel (Environment Variables), tidak pernah dikirim ke browser.
-const GEMINI_MODEL = 'gemini-3.8-flash';
+// Kalau satu model sedang penuh (503), otomatis coba model berikutnya
+const GEMINI_MODELS = ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite'];
 const OPENROUTER_MODEL = 'openrouter/free';
 const PERSONA = 'Kamu adalah GUSTAV.AI, asisten AI yang ramah dan membantu. Jawab dalam bahasa yang dipakai pengguna. Format jawaban rapi dan singkat: boleh pakai **tebal** dan daftar bernomor. Tulis rumus matematika dengan simbol biasa (contoh: 2/9, ÷, ×, x², √16) dan jangan pakai LaTeX atau tanda dolar. Kalau ada foto, baca isinya dengan teliti lalu jawab langkah demi langkah.';
 
@@ -34,23 +35,31 @@ async function askGemini(key, contents, image) {
     (history ? 'Riwayat percakapan sebelumnya:\n' + history + '\n\n' : '') +
     'Pesan terbaru dari pengguna (jawab yang ini):\n' + textOf(last);
 
-  const r = await fetch('https://generativelanguage.googleapis.com/v1beta/interactions', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key, 'Api-Revision': '2026-05-20' },
-    body: JSON.stringify({
-      model: GEMINI_MODEL,
-      input: image
-        ? [{ type: 'text', text: input }, { type: 'image', data: image.data, mime_type: image.mime_type }]
-        : input
-    })
-  });
-  const raw = await r.text();
-  let data = {};
-  try { data = JSON.parse(raw); } catch {}
-  if (!r.ok) throw new Error('[gemini] ' + ((data.error && data.error.message) || raw.slice(0, 200) || 'ditolak'));
-  const reply = extractGemini(data).trim();
-  if (!reply) throw new Error('[gemini] Tidak ada jawaban dari model.');
-  return reply;
+  const payloadInput = image
+    ? [{ type: 'text', text: input }, { type: 'image', data: image.data, mime_type: image.mime_type }]
+    : input;
+
+  let lastErr = new Error('[gemini] Gagal.');
+  for (const model of GEMINI_MODELS) {
+    const r = await fetch('https://generativelanguage.googleapis.com/v1beta/interactions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key, 'Api-Revision': '2026-05-20' },
+      body: JSON.stringify({ model, input: payloadInput })
+    });
+    const raw = await r.text();
+    let data = {};
+    try { data = JSON.parse(raw); } catch {}
+    if (r.ok) {
+      const reply = extractGemini(data).trim();
+      if (reply) return reply;
+      lastErr = new Error('[gemini] Tidak ada jawaban dari model.');
+      continue;
+    }
+    lastErr = new Error('[gemini] ' + ((data.error && data.error.message) || raw.slice(0, 200) || 'ditolak'));
+    lastErr.status = r.status;
+    if (r.status === 401 || r.status === 403) break; // masalah key, ganti model tidak membantu
+  }
+  throw lastErr;
 }
 
 async function askOpenRouter(key, contents, image) {
