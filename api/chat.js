@@ -1,6 +1,8 @@
+// Vercel function: coba Gemini dulu (cepat), kalau gagal pakai OpenRouter sebagai cadangan.
+// API key disimpan di Vercel (Environment Variables), tidak pernah dikirim ke browser.
 const GEMINI_MODEL = 'gemini-3.8-flash';
 const OPENROUTER_MODEL = 'openrouter/free';
-const PERSONA = 'Kamu adalah GUSTAV.AI, asisten AI yang ramah dan membantu. Jawab dalam bahasa yang dipakai pengguna.';
+const PERSONA = 'Kamu adalah GUSTAV.AI, asisten AI yang ramah dan membantu. Jawab dalam bahasa yang dipakai pengguna. Format jawaban rapi dan singkat: boleh pakai **tebal** dan daftar bernomor. Tulis rumus matematika dengan simbol biasa (contoh: 2/9, ÷, ×, x², √16) dan jangan pakai LaTeX atau tanda dolar. Kalau ada foto, baca isinya dengan teliti lalu jawab langkah demi langkah.';
 
 const textOf = (turn) =>
   (turn.parts || []).map((p) => p.text || '').join('\n').trim();
@@ -22,7 +24,7 @@ function extractGemini(d) {
     .join('\n');
 }
 
-async function askGemini(key, contents) {
+async function askGemini(key, contents, image) {
   const last = contents[contents.length - 1];
   const history = contents.slice(0, -1)
     .map((t) => (t.role === 'model' ? 'GUSTAV.AI: ' : 'Pengguna: ') + textOf(t))
@@ -35,7 +37,12 @@ async function askGemini(key, contents) {
   const r = await fetch('https://generativelanguage.googleapis.com/v1beta/interactions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key, 'Api-Revision': '2026-05-20' },
-    body: JSON.stringify({ model: GEMINI_MODEL, input })
+    body: JSON.stringify({
+      model: GEMINI_MODEL,
+      input: image
+        ? [{ type: 'text', text: input }, { type: 'image', data: image.data, mime_type: image.mime_type }]
+        : input
+    })
   });
   const raw = await r.text();
   let data = {};
@@ -46,11 +53,18 @@ async function askGemini(key, contents) {
   return reply;
 }
 
-async function askOpenRouter(key, contents) {
+async function askOpenRouter(key, contents, image) {
   const messages = [
     { role: 'system', content: PERSONA },
     ...contents.map((t) => ({ role: t.role === 'model' ? 'assistant' : 'user', content: textOf(t) }))
   ];
+  if (image) {
+    const lastMsg = messages[messages.length - 1];
+    lastMsg.content = [
+      { type: 'text', text: lastMsg.content },
+      { type: 'image_url', image_url: { url: 'data:' + image.mime_type + ';base64,' + image.data } }
+    ];
+  }
   const r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key, 'X-Title': 'GUSTAV.AI' },
@@ -86,17 +100,26 @@ module.exports = async function handler(req, res) {
     if (contents.length === 0) return res.status(400).json({ error: 'Pesan kosong.' });
     if (JSON.stringify(contents).length > 20000) return res.status(413).json({ error: 'Pesan terlalu panjang.' });
 
+    let image = null;
+    if (body.image && typeof body.image.data === 'string') {
+      if (!['image/jpeg', 'image/png', 'image/webp'].includes(body.image.mime_type)) {
+        return res.status(400).json({ error: 'Format foto tidak didukung (pakai JPG, PNG, atau WEBP).' });
+      }
+      if (body.image.data.length > 4000000) return res.status(413).json({ error: 'Foto terlalu besar.' });
+      image = { mime_type: body.image.mime_type, data: body.image.data };
+    }
+
     let gemError = null;
     if (gemKey) {
       try {
-        return res.status(200).json({ reply: await askGemini(gemKey, contents) });
+        return res.status(200).json({ reply: await askGemini(gemKey, contents, image) });
       } catch (e) {
         gemError = e;
         if (!orKey) return res.status(502).json({ error: e.message });
       }
     }
     try {
-      return res.status(200).json({ reply: await askOpenRouter(orKey, contents) });
+      return res.status(200).json({ reply: await askOpenRouter(orKey, contents, image) });
     } catch (e) {
       return res.status(502).json({ error: (gemError ? gemError.message + ' | ' : '') + e.message });
     }
