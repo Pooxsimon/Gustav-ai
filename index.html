@@ -117,6 +117,7 @@
   .rich pre code { background: none; padding: 0; color: inherit; }
   .rich .math { font-family: "Cambria Math", Georgia, serif; font-size: 1.04em; }
   .rich .math.dm { display: block; text-align: center; margin: 4px 0; }
+  .rich .note { font-size: 13px; color: var(--err); }
   .rich hr { border: 0; border-top: 1px solid rgba(0,0,0,.2); margin: 8px 0; }
 
   /* ===== Foto ===== */
@@ -173,7 +174,7 @@
 <path d="M43 23A14 14 0 1 0 46 32L34 32" fill="none" stroke="#f6c62b" stroke-width="7" stroke-linejoin="round"/></svg></div>
     <div>
       <h1 class="brand">GUSTAV<span>.AI</span></h1>
-      <p class="tagline">Asisten AI pribadi kamu · v4</p>
+      <p class="tagline">Asisten AI pribadi kamu · v5</p>
     </div>
   </header>
 
@@ -387,6 +388,15 @@
     return div;
   }
 
+  var raf = (typeof requestAnimationFrame === 'function')
+    ? requestAnimationFrame
+    : function (f) { return setTimeout(f, 16); };
+
+  function stickScroll() {
+    var nearBottom = (messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight) < 160;
+    if (nearBottom || !messagesEl.clientHeight) messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+
   async function sendMessage() {
     if (busy) return;
     var text = input.value.trim();
@@ -408,23 +418,73 @@
       var res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contents: chatHistory, image: image ? { mime_type: image.mime_type, data: image.data } : undefined })
+        body: JSON.stringify({
+          contents: chatHistory,
+          stream: true,
+          image: image ? { mime_type: image.mime_type, data: image.data } : undefined
+        })
       });
 
-      var raw = await res.text();
-      var data = null;
-      try { data = JSON.parse(raw); } catch (e) {}
-      if (!data) {
-        throw new Error('Server tidak membalas dengan benar (kode ' + res.status + '). Fungsi chat kemungkinan belum aktif.');
+      var ctype = (res.headers && res.headers.get('content-type')) || '';
+      var reply = '';
+
+      if (ctype.indexOf('application/json') !== -1 || !res.body) {
+        // Jawaban biasa (atau pesan error) dalam bentuk JSON
+        var raw = await res.text();
+        var data = null;
+        try { data = JSON.parse(raw); } catch (e) {}
+        if (!data) {
+          throw new Error('Server tidak membalas dengan benar (kode ' + res.status + '). Fungsi chat kemungkinan belum aktif.');
+        }
+        if (!res.ok) {
+          throw new Error(data.error || ('Permintaan gagal (' + res.status + ')'));
+        }
+        reply = data.reply || '(Tidak ada jawaban dari model)';
+        waiting.className = 'msg bot rich';
+        waiting.innerHTML = formatReply(reply);
+      } else {
+        // Jawaban bertahap: satu baris JSON per potongan
+        var reader = res.body.getReader();
+        var dec = new TextDecoder();
+        var buf = '';
+        var streamErr = null;
+        var scheduled = false;
+        var paint = function () {
+          scheduled = false;
+          waiting.innerHTML = formatReply(reply);
+          stickScroll();
+        };
+        waiting.className = 'msg bot rich';
+        waiting.textContent = '';
+
+        while (true) {
+          var chunk = await reader.read();
+          if (chunk.done) break;
+          buf += dec.decode(chunk.value, { stream: true });
+          var nl;
+          while ((nl = buf.indexOf('\n')) !== -1) {
+            var line = buf.slice(0, nl).trim();
+            buf = buf.slice(nl + 1);
+            if (!line) continue;
+            var o;
+            try { o = JSON.parse(line); } catch (e) { continue; }
+            if (o.t) {
+              reply += o.t;
+              if (!scheduled) { scheduled = true; raf(paint); }
+            } else if (o.error) {
+              streamErr = o.error;
+            }
+          }
+        }
+
+        if (!reply) throw new Error(streamErr || 'Tidak ada jawaban dari model.');
+        waiting.innerHTML = formatReply(reply);
+        if (streamErr) {
+          waiting.innerHTML += '<div class="sp"></div><div class="note">Koneksi terputus di tengah jalan: ' + esc(streamErr) + '</div>';
+        }
       }
-      if (!res.ok) {
-        throw new Error(data.error || ('Permintaan gagal (' + res.status + ')'));
-      }
-      var reply = data.reply || '(Tidak ada jawaban dari model)';
 
       chatHistory.push({ role: 'model', parts: [{ text: reply }] });
-      waiting.className = 'msg bot rich';
-      waiting.innerHTML = formatReply(reply);
     } catch (err) {
       chatHistory.pop();
       if (image) setImage(image);
