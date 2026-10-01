@@ -104,6 +104,33 @@
     border-bottom-left-radius: 4px;
   }
 
+  /* ===== Jawaban berformat ===== */
+  .msg.rich { white-space: normal; }
+  .rich .li { display: flex; gap: 8px; margin: 2px 0; }
+  .rich .bul { flex: none; min-width: 1.3em; }
+  .rich .sp { height: 8px; }
+  .rich .h { display: block; font-weight: 800; margin: 6px 0 2px; }
+  .rich code { background: rgba(0,0,0,.08); padding: 1px 5px; border-radius: 4px;
+    font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13.5px; }
+  .rich pre { background: var(--ink); color: #fff; padding: 10px 12px; border-radius: 8px;
+    overflow-x: auto; margin: 6px 0; white-space: pre; }
+  .rich pre code { background: none; padding: 0; color: inherit; }
+  .rich .math { font-family: "Cambria Math", Georgia, serif; font-size: 1.04em; }
+  .rich .math.dm { display: block; text-align: center; margin: 4px 0; }
+  .rich hr { border: 0; border-top: 1px solid rgba(0,0,0,.2); margin: 8px 0; }
+
+  /* ===== Foto ===== */
+  .msg img.pic { display: block; max-width: 100%; max-height: 240px; border-radius: 10px;
+    margin-bottom: 6px; border: 1px solid var(--line); }
+  button.icon-btn { flex: none; width: 44px; padding: 0; background: #fff; color: var(--ink);
+    border: 1px solid var(--line); display: grid; place-items: center; }
+  button.icon-btn:hover:not(:disabled) { background: #f3f3f3; }
+  .preview { display: none; align-items: center; gap: 10px; padding: 8px 18px 0; background: #fff; }
+  .preview.on { display: flex; }
+  .preview img { height: 56px; border-radius: 8px; border: 1px solid var(--line); }
+  .preview span { font-size: 13px; color: var(--muted); flex: 1; }
+  button.x { width: 32px; height: 32px; padding: 0; border-radius: 50%; background: #eee; font-size: 16px; }
+
   .composer {
     display: flex;
     gap: 8px;
@@ -146,7 +173,7 @@
 <path d="M43 23A14 14 0 1 0 46 32L34 32" fill="none" stroke="#f6c62b" stroke-width="7" stroke-linejoin="round"/></svg></div>
     <div>
       <h1 class="brand">GUSTAV<span>.AI</span></h1>
-      <p class="tagline">Asisten AI pribadi kamu · v3</p>
+      <p class="tagline">Asisten AI pribadi kamu · v4</p>
     </div>
   </header>
 
@@ -161,8 +188,18 @@
     </div>
   </div>
 
+  <div class="preview" id="preview">
+    <img id="previewImg" alt="Foto terlampir">
+    <span>Foto siap dikirim</span>
+    <button class="x" id="removeImg" type="button" aria-label="Hapus foto">&#10005;</button>
+  </div>
+
   <div class="composer">
-    <textarea id="input" rows="1" placeholder="Ketik pesan..."></textarea>
+    <button class="icon-btn" id="attach" type="button" aria-label="Tambah foto">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+    </button>
+    <input type="file" id="file" accept="image/*" hidden>
+    <textarea id="input" rows="1" placeholder="Ketik pesan atau kirim foto soal..."></textarea>
     <button id="send" type="button">Kirim</button>
   </div>
 </div>
@@ -193,15 +230,175 @@
     return 'Gagal: ' + m;
   }
 
+  // ===== Perapi jawaban: ubah markdown dan LaTeX jadi tampilan yang enak dibaca =====
+  function esc(s) {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function texToText(t) {
+    var s = t;
+    var simple = function (x) { return /^[\w.,]+$/.test(x.trim()); };
+    var prev;
+    do {
+      prev = s;
+      s = s.replace(/(\d?)\\[dt]?frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g, function (m, d, a, b) {
+        return d + (d ? ' ' : '') + (simple(a) ? a.trim() : '(' + a + ')') + '/' + (simple(b) ? b.trim() : '(' + b + ')');
+      });
+    } while (s !== prev);
+    s = s.replace(/\\sqrt\s*\{([^{}]*)\}/g, function (m, a) { return '\u221A' + (simple(a) ? a.trim() : '(' + a + ')'); });
+    s = s.replace(/\\sqrt\s*(\w)/g, '\u221A$1');
+    s = s.replace(/\\(?:text|mathrm|mathbf|mathit|operatorname)\s*\{([^{}]*)\}/g, '$1');
+    s = s.replace(/\\\\/g, ' ');
+    var map = {
+      div: '\u00F7', times: '\u00D7', cdot: '\u00B7', approx: '\u2248', neq: '\u2260', ne: '\u2260',
+      leq: '\u2264', le: '\u2264', geq: '\u2265', ge: '\u2265', pm: '\u00B1', mp: '\u2213',
+      pi: '\u03C0', infty: '\u221E', rightarrow: '\u2192', to: '\u2192', Rightarrow: '\u21D2',
+      leftarrow: '\u2190', degree: '\u00B0', circ: '\u00B0', alpha: '\u03B1', beta: '\u03B2',
+      theta: '\u03B8', Delta: '\u0394', sum: '\u03A3', ldots: '\u2026', dots: '\u2026', cdots: '\u22EF',
+      quad: ' ', qquad: '  ', left: '', right: ''
+    };
+    s = s.replace(/\\([a-zA-Z]+)/g, function (m, name) {
+      return Object.prototype.hasOwnProperty.call(map, name) ? map[name] : name;
+    });
+    s = s.replace(/\\[,;:! ]/g, ' ');
+    var sup = '\u2070\u00B9\u00B2\u00B3\u2074\u2075\u2076\u2077\u2078\u2079';
+    s = s.replace(/\^\{?(\d+)\}?/g, function (m, d) {
+      return d.split('').map(function (c) { return sup.charAt(+c); }).join('');
+    });
+    s = s.replace(/\^\{([^{}]*)\}/g, '^($1)');
+    s = s.replace(/_\{([^{}]*)\}/g, '_$1');
+    s = s.replace(/[{}]/g, '');
+    return s.replace(/\s+/g, ' ').trim();
+  }
+
+  function inlineFmt(h) {
+    h = h.replace(/`([^`]+)`/g, '<code>$1</code>');
+    h = h.replace(/\*\*([^*]+?)\*\*/g, '<strong>$1</strong>');
+    h = h.replace(/(^|[^*\w])\*([^*\s][^*]*?)\*(?![*\w])/g, '$1<em>$2</em>');
+    return h;
+  }
+
+  function listItem(bullet, text, indent) {
+    var pad = Math.min(Math.floor(indent.length / 2), 4) * 14;
+    return '<div class="li" style="margin-left:' + pad + 'px"><span class="bul">' + bullet +
+      '</span><span>' + inlineFmt(esc(text)) + '</span></div>';
+  }
+
+  function formatReply(text) {
+    var store = [];
+    var hold = function (html) { store.push(html); return '\u0000' + (store.length - 1) + '\u0000'; };
+    var s = String(text).replace(/\r/g, '');
+
+    s = s.replace(/```[^\n]*\n?([\s\S]*?)```/g, function (m, c) {
+      return hold('<pre><code>' + esc(c.replace(/\n$/, '')) + '</code></pre>');
+    });
+    var display = function (m, t) { return hold('<span class="math dm">' + esc(texToText(t)) + '</span>'); };
+    var inline = function (m, t) { return hold('<span class="math">' + esc(texToText(t)) + '</span>'); };
+    s = s.replace(/\$\$([\s\S]+?)\$\$/g, display);
+    s = s.replace(/\\\[([\s\S]+?)\\\]/g, display);
+    s = s.replace(/\\\(([\s\S]+?)\\\)/g, inline);
+    s = s.replace(/\$([^\s$][^$\n]{0,200}?)\$/g, function (m, t) {
+      return /\s$/.test(t) ? m : inline(m, t);
+    });
+
+    var out = [];
+    var lastWasSpace = true;
+    s.split('\n').forEach(function (line) {
+      var m;
+      if (/^\s*$/.test(line)) {
+        if (!lastWasSpace) out.push('<div class="sp"></div>');
+        lastWasSpace = true;
+        return;
+      }
+      lastWasSpace = false;
+      if ((m = line.match(/^\s{0,3}#{1,6}\s+(.*)$/))) { out.push('<span class="h">' + inlineFmt(esc(m[1])) + '</span>'); return; }
+      if (/^\s*([-*_])\1{2,}\s*$/.test(line)) { out.push('<hr>'); return; }
+      if ((m = line.match(/^(\s*)[*\-\u2022]\s+(.*)$/))) { out.push(listItem('\u2022', m[2], m[1])); return; }
+      if ((m = line.match(/^(\s*)(\d+[.)])\s+(.*)$/))) { out.push(listItem(m[2], m[3], m[1])); return; }
+      out.push('<div>' + inlineFmt(esc(line)) + '</div>');
+    });
+    while (out.length && out[out.length - 1] === '<div class="sp"></div>') out.pop();
+
+    return out.join('').replace(/\u0000(\d+)\u0000/g, function (m, n) { return store[+n]; });
+  }
+
+  // ===== Foto =====
+  var pendingImage = null;
+  var fileInput = document.getElementById('file');
+  var attachBtn = document.getElementById('attach');
+  var previewEl = document.getElementById('preview');
+  var previewImg = document.getElementById('previewImg');
+
+  function setImage(img) {
+    pendingImage = img;
+    if (img) {
+      previewImg.src = img.url;
+      previewEl.classList.add('on');
+    } else {
+      previewEl.classList.remove('on');
+      previewImg.removeAttribute('src');
+    }
+  }
+
+  function shrinkImage(file, maxSide, quality) {
+    return new Promise(function (resolve, reject) {
+      var url = URL.createObjectURL(file);
+      var im = new Image();
+      im.onload = function () {
+        var scale = Math.min(1, maxSide / Math.max(im.naturalWidth, im.naturalHeight));
+        var cw = Math.round(im.naturalWidth * scale);
+        var ch = Math.round(im.naturalHeight * scale);
+        var c = document.createElement('canvas');
+        c.width = cw; c.height = ch;
+        var ctx = c.getContext('2d');
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(0, 0, cw, ch);
+        ctx.drawImage(im, 0, 0, cw, ch);
+        URL.revokeObjectURL(url);
+        var dataUrl = c.toDataURL('image/jpeg', quality);
+        resolve({ mime_type: 'image/jpeg', data: dataUrl.split(',')[1], url: dataUrl });
+      };
+      im.onerror = function () { URL.revokeObjectURL(url); reject(new Error('gambar tidak bisa dibaca')); };
+      im.src = url;
+    });
+  }
+
+  attachBtn.addEventListener('click', function () { fileInput.click(); });
+  document.getElementById('removeImg').addEventListener('click', function () { setImage(null); });
+  fileInput.addEventListener('change', function () {
+    var f = fileInput.files && fileInput.files[0];
+    fileInput.value = '';
+    if (!f) return;
+    if (!/^image\//.test(f.type)) { addMessage('File harus berupa gambar (foto).', 'error'); return; }
+    shrinkImage(f, 1280, 0.8).then(setImage).catch(function () {
+      addMessage('Foto tidak bisa dibaca. Coba foto lain.', 'error');
+    });
+  });
+
+  function addUserMessage(text, imgUrl) {
+    var div = addMessage('', 'user');
+    if (imgUrl) {
+      var im = document.createElement('img');
+      im.className = 'pic';
+      im.src = imgUrl;
+      div.appendChild(im);
+    }
+    div.appendChild(document.createTextNode(text));
+    return div;
+  }
+
   async function sendMessage() {
     if (busy) return;
     var text = input.value.trim();
-    if (!text) return;
+    var image = pendingImage;
+    if (!text && !image) return;
+    if (!text) text = 'Tolong baca foto ini, lalu jawab atau selesaikan soal/pertanyaan di dalamnya langkah demi langkah.';
 
     input.value = '';
     input.style.height = 'auto';
-    addMessage(text, 'user');
-    chatHistory.push({ role: 'user', parts: [{ text: text }] });
+    addUserMessage(text, image ? image.url : null);
+    setImage(null);
+    chatHistory.push({ role: 'user', parts: [{ text: text + (image ? ' [pengguna melampirkan foto]' : '') }] });
 
     var waiting = addMessage('GUSTAV.AI sedang berpikir...', 'bot wait');
     busy = true;
@@ -211,14 +408,14 @@
       var res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contents: chatHistory })
+        body: JSON.stringify({ contents: chatHistory, image: image ? { mime_type: image.mime_type, data: image.data } : undefined })
       });
 
       var raw = await res.text();
       var data = null;
       try { data = JSON.parse(raw); } catch (e) {}
       if (!data) {
-        throw new Error('Server tidak membalas dengan benar (kode ' + res.status + '). Fungsi chat kemungkinan belum aktif di Netlify.');
+        throw new Error('Server tidak membalas dengan benar (kode ' + res.status + '). Fungsi chat kemungkinan belum aktif.');
       }
       if (!res.ok) {
         throw new Error(data.error || ('Permintaan gagal (' + res.status + ')'));
@@ -226,10 +423,11 @@
       var reply = data.reply || '(Tidak ada jawaban dari model)';
 
       chatHistory.push({ role: 'model', parts: [{ text: reply }] });
-      waiting.className = 'msg bot';
-      waiting.textContent = reply;
+      waiting.className = 'msg bot rich';
+      waiting.innerHTML = formatReply(reply);
     } catch (err) {
       chatHistory.pop();
+      if (image) setImage(image);
       waiting.className = 'msg error';
       waiting.textContent = friendlyError(err);
     } finally {
