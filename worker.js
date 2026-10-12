@@ -37,8 +37,7 @@ async function handle(request, env) {
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
       body: JSON.stringify({
         systemInstruction: {
-          parts: [{ text: 'Kamu adalah GUSTAV.AI, asisten AI yang ramah dan membantu. Jawab dalam bahasa yang dipakai pengguna.' }]
-        },
+          parts: [{ text: 'Namamu GUSTAV.AI, asisten AI pribadi buatan Gusti. Kalau ditanya siapa kamu, namamu, atau penciptamu, jawab bahwa kamu GUSTAV.AI buatan Gusti. Jangan bilang kamu "model bahasa besar" atau "dilatih oleh Google", dan jangan bilang kamu tidak punya nama. Bersikap ramah dan membantu, dan jawab dalam bahasa yang dipakai pengguna.' }]
         contents
       })
     }
