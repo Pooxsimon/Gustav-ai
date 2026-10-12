@@ -19,7 +19,7 @@ export default {
 };
 
 async function handle(request, env) {
-  if (request.method !== 'POST') return json({ error: 'Method tidak diizinkan', variabel_terbaca: Object.keys(env) }, 405);
+  if (request.method !== 'POST') return json({ error: 'Method tidak diizinkan' }, 405);
   const apiKey = env.GEMINI_API_KEY;
   if (!apiKey) return json({ error: 'GEMINI_API_KEY belum diatur.' }, 500);
 
