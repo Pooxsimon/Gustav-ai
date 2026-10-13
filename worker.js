@@ -1,6 +1,6 @@
 // Urutan model: kalau kuota gratis model pertama habis, otomatis pindah ke berikutnya.
 // Kuota Gemini dihitung per model, jadi tiap model punya jatah harian sendiri.
-const MODELS = ['gemini-2.5-flash', 'gemini-2.5-flash-lite'];
+const MODELS = ['gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-2.5-flash'];
 
 const SYSTEM_TEXT =
   'Namamu GUSTAV.AI, asisten AI pribadi buatan Gusti. ' +
@@ -61,6 +61,7 @@ async function handle(request, env) {
   });
 
   let lastStatus = 500;
+  let sawQuota = false;
   let lastMessage = 'Gemini menolak permintaan.';
 
   for (const model of MODELS) {
@@ -85,6 +86,7 @@ async function handle(request, env) {
     }
 
     lastStatus = res.status;
+    if (res.status === 429) sawQuota = true;
     lastMessage = (data.error && data.error.message) || lastMessage;
 
     // Kuota habis (429), server sibuk (503), atau model tidak tersedia (404): coba model berikutnya
@@ -94,8 +96,8 @@ async function handle(request, env) {
     return json({ error: lastMessage }, lastStatus);
   }
 
-  if (lastStatus === 429) {
-    return json({ error: 'Kuota gratis hari ini habis untuk semua model. Coba lagi nanti ya.' }, 429);
+  if (sawQuota) {
+    return json({ error: 'Kuota gratis hari ini habis. Coba lagi nanti ya.' }, 429);
   }
-  return json({ error: lastMessage }, lastStatus);
+  return json({ error: 'Layanan AI sedang tidak tersedia. Coba lagi sebentar lagi.' }, 503);
 }
