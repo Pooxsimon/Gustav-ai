@@ -2,7 +2,8 @@
   "name": "gustav-ai",
   "main": "worker.js",
   "compatibility_date": "2026-10-01",
-"keep_vars": true,
+  "keep_vars": true,
+  "placement": { "region": "aws:us-east-1" },
   "assets": {
     "directory": "./",
     "binding": "ASSETS",
